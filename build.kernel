@@ -1,0 +1,67 @@
+DEFCONFIG="gki_defconfig custom.config"
+# POST_DEFCONFIG_CMDS="check_defconfig"
+
+ARCH=arm64
+
+LLVM_IAS=1
+CROSS_COMPILE=aarch64-linux-gnu-
+CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+LINUX_GCC_CROSS_COMPILE_PREBUILTS_BIN=prebuilts/gas/linux-x86
+
+MAKE_GOALS="
+Image
+modules
+"
+
+FILES="
+arch/arm64/boot/Image
+vmlinux
+System.map
+vmlinux.symvers
+modules.builtin
+modules.builtin.modinfo
+"
+
+BRANCH=android12-5.10
+KMI_GENERATION=9
+
+LLVM=1
+DEPMOD=depmod
+DTC=dtc
+CLANG_PREBUILT_BIN=prebuilts-master/clang/host/linux-x86/clang-r416183b/bin
+BUILDTOOLS_PREBUILT_BIN=build/build-tools/path/linux-x86
+
+KCFLAGS="${KCFLAGS} -D__ANDROID_COMMON_KERNEL__"
+EXTRA_CMDS=''
+STOP_SHIP_TRACEPRINTK=1
+IN_KERNEL_MODULES=1
+DO_NOT_STRIP_MODULES=1
+
+HERMETIC_TOOLCHAIN=${HERMETIC_TOOLCHAIN:-1}
+
+
+MAKE_GOALS="${MAKE_GOALS}
+Image.lz4
+"
+
+ABI_DEFINITION=android/abi_gki_aarch64.xml
+TIDY_ABI=1
+KMI_SYMBOL_LIST=android/abi_gki_aarch64
+ADDITIONAL_KMI_SYMBOL_LISTS="
+android/abi_gki_aarch64_type_visibility
+android/abi_gki_aarch64_mtk
+android/abi_gki_aarch64_transsion
+"
+
+FILES="${FILES}
+arch/arm64/boot/Image.lz4
+"
+
+TRIM_NONLISTED_KMI=${TRIM_NONLISTED_KMI:-1}
+KMI_SYMBOL_LIST_STRICT_MODE=${KMI_SYMBOL_LIST_STRICT_MODE:-1}
+MODULES_ORDER=android/gki_aarch64_modules
+KMI_ENFORCED=1
+
+if [ -n "${GKI_DEFCONFIG_FRAGMENT}" ]; then
+source ${GKI_DEFCONFIG_FRAGMENT}
+fi
