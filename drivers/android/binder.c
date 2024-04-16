@@ -3072,7 +3072,7 @@ static struct genl_family binder_gnl_family = {
 	.n_small_ops = ARRAY_SIZE(binder_genl_ops),
 };
 
-static int init_binder_netlink()
+static int init_binder_netlink(void)
 {
 	int ret = genl_register_family(&binder_gnl_family);
 	if (ret) {
