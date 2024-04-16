@@ -773,7 +773,7 @@ int uvcg_video_enable(struct uvc_video *video)
 
 	video->req_int_count = 0;
 
-	schedule_work(&video->pump);
+	uvc_video_ep_queue_initial_requests(video);
 
 	return ret;
 }
