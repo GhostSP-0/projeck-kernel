@@ -57,6 +57,7 @@
 #include <linux/sched/signal.h>
 #include <linux/sched/mm.h>
 #include <linux/seq_file.h>
+#include <linux/skbuff.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/pid_namespace.h>
@@ -67,6 +68,8 @@
 #include <linux/task_work.h>
 #include <linux/sizes.h>
 #include <linux/android_vendor.h>
+#include <net/sock.h>
+#include <net/genetlink.h>
 
 #include <uapi/linux/sched/types.h>
 #include <uapi/linux/android/binder.h>
@@ -3003,6 +3006,134 @@ static struct binder_node *binder_get_node_refs_for_txn(
 	return target_node;
 }
 
+#define BINDER_GENL_FAMILY_NAME	"binder"
+#define BINDER_GENL_VERSION	0x01
+
+enum binder_genl_attr {
+	BINDER_GENL_ATTR_UNSPEC,
+	BINDER_GENL_ATTR_FLAGS,
+	BINDER_GENL_ATTR_REPORT,
+	__BINDER_GENL_ATTR_MAX,
+};
+#define BINDER_GENL_ATTR_MAX (__BINDER_GENL_ATTR_MAX - 1)
+
+enum binder_genl_cmd {
+	BINDER_GENL_CMD_UNSPEC,
+	BINDER_GENL_CMD_ENABLE,
+	BINDER_GENL_CMD_REPORT,
+	__BINDER_GENL_CMD_MAX,
+};
+#define BINDER_GENL_CMD_MAX (__BINDER_GENL_CMD_MAX - 1)
+
+/**
+ * Defines what kinds of binder transactions should be reported.
+ */
+static uint32_t binder_report_flags;
+
+/**
+ * Only the process that enables binder_report would receive binder reports.
+ */
+static pid_t binder_report_pid;
+
+static int binder_genl_cmd_doit(struct sk_buff *skb, struct genl_info *info) {
+	struct nlattr *nla;
+
+	nla = info->attrs[BINDER_GENL_ATTR_FLAGS];
+	if (!nla) {
+		pr_err("Invalid binder netlink message\n");
+		return EINVAL;
+	}
+	binder_report_flags = nla_get_u32(nla);
+	binder_report_pid = nlmsg_hdr(skb)->nlmsg_pid;
+	pr_info("Binder report enabled with flags 0x%08x from pid %d\n",
+			binder_report_flags, binder_report_pid);
+
+	return 0;
+}
+
+static const struct nla_policy binder_report_policy[BINDER_GENL_ATTR_MAX + 1] = {
+	[BINDER_GENL_ATTR_FLAGS]	= { .type = NLA_U32 },
+};
+
+static struct genl_small_ops binder_genl_ops[] = {
+	{
+		.cmd = BINDER_GENL_CMD_ENABLE,
+		.doit = binder_genl_cmd_doit,
+	}
+};
+
+static struct genl_family binder_gnl_family = {
+	.hdrsize = 0,
+	.name = BINDER_GENL_FAMILY_NAME,
+	.version = BINDER_GENL_VERSION,
+	.maxattr = BINDER_GENL_ATTR_MAX,
+	.policy	= binder_report_policy,
+	.small_ops = binder_genl_ops,
+	.n_small_ops = ARRAY_SIZE(binder_genl_ops),
+};
+
+static int init_binder_netlink()
+{
+	int ret = genl_register_family(&binder_gnl_family);
+	if (ret) {
+		pr_err("Failed to register binder generic netlink\n");
+		return ret;
+	}
+
+	pr_info("Binder generic netlink v%d inited\n", BINDER_GENL_VERSION);
+
+	return 0;
+}
+
+static inline bool binder_report_enabled(uint32_t mask)
+{
+	return (binder_report_flags & mask) != 0;
+}
+
+static void binder_send_report(struct binder_context *context, int err,
+		int from, int to, int flags, int code, int size)
+{
+	int len;
+	struct binder_report report;
+	struct sk_buff *skb;
+	void *hdr;
+
+	len = sizeof(struct binder_report);
+	skb = genlmsg_new(len, GFP_KERNEL);
+	if (!skb) {
+		pr_err("Failed to alloc binder netlink message\n");
+		return;
+	}
+
+	hdr = genlmsg_put(skb, binder_report_pid, 0, &binder_gnl_family, 0,
+			BINDER_GENL_CMD_REPORT);
+	if (!hdr) {
+		pr_err("Failed to set binder netlink header\n");
+		kfree_skb(skb);
+		return;
+	}
+
+	report.err = err;
+	report.from = from;
+	report.to = to;
+	report.flags = flags;
+	report.code = code;
+	report.size = size;
+
+	if (nla_put(skb, BINDER_GENL_ATTR_REPORT, len, &report)) {
+		genlmsg_cancel(skb, hdr);
+		nlmsg_free(skb);
+		return;
+	}
+
+	genlmsg_end(skb, hdr);
+
+	if (genlmsg_unicast(&init_net, skb, 1))
+		pr_err("Failed to send binder netlink message\n");
+
+	pr_info("Binder netlink report sent\n");
+}
+
 static void binder_transaction(struct binder_proc *proc,
 			       struct binder_thread *thread,
 			       struct binder_transaction_data *tr, int reply,
@@ -3788,6 +3919,13 @@ err_invalid_target_handle:
 		binder_dec_node(target_node, 1, 0);
 		binder_dec_node_tmpref(target_node);
 	}
+
+
+	if (binder_report_enabled(BINDER_REPORT_FAILED))
+		binder_send_report(context, return_error, proc->pid,
+				target_proc ? target_proc->pid :
+				(target_thread ? target_thread->pid : 0),
+				tr->flags, tr->code, tr->data_size);
 
 	binder_debug(BINDER_DEBUG_FAILED_TRANSACTION,
 		     "%d:%d transaction failed %d/%d, size %lld-%lld line %d\n",
@@ -6655,6 +6793,9 @@ static int __init binder_init(void)
 	char *device_names = NULL;
 
 	ret = binder_alloc_shrinker_init();
+	if (ret)
+		return ret;
+	ret = init_binder_netlink();
 	if (ret)
 		return ret;
 

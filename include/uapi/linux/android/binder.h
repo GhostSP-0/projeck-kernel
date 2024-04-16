@@ -284,6 +284,21 @@ struct binder_frozen_status_info {
 	__u32            async_recv;
 };
 
+struct binder_report {
+	__u32	err;	/* returned transaction error */
+	__u32	from;	/* sender pid */
+	__u32	to;	/* target pid */
+	__u32	flags;	/* transaction flags */
+	__u32	code;	/* tranaction code */
+	__u32	size;	/* transaction data size */
+};
+
+enum binder_report_flags {
+	BINDER_REPORT_FAILED	= 0x1,	/* failed txn */
+	BINDER_REPORT_DELAYED	= 0x2,	/* delayed txn */
+	BINDER_REPORT_SPAMMING	= 0x4,	/* spamming txn */
+};
+
 #define BINDER_WRITE_READ		_IOWR('b', 1, struct binder_write_read)
 #define BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, __s64)
 #define BINDER_SET_MAX_THREADS		_IOW('b', 5, __u32)
