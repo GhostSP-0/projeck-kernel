@@ -2065,7 +2065,6 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.desc = "Protected KVM",
 		.capability = ARM64_KVM_PROTECTED_MODE,
 		.type = ARM64_CPUCAP_SYSTEM_FEATURE,
-		.matches = is_kvm_protected_mode,
 	},
 #endif
 	{
